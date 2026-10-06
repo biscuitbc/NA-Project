@@ -1,0 +1,499 @@
+% !TeX program = xelatex
+% 使用 XeLaTeX 编译两次；采用 TeX Live 自带的 Fandol 中文字体。
+\documentclass[UTF8,11pt,a4paper,fontset=fandol]{ctexart}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,mathtools,amsthm}
+\usepackage{booktabs,array,tabularx,enumitem,fancyhdr}
+\usepackage[hidelinks]{hyperref}
+\setlength{\parindent}{2em}
+\setlength{\parskip}{0.35em}
+\setlist{topsep=0.3em,itemsep=0.25em}
+\setlist[enumerate,1]{leftmargin=2em}
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{Doolittle 分解法自学报告}
+\rhead{紧凑存储与部分选主元}
+\cfoot{\thepage}
+\setlength{\headheight}{15pt}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\mat}[1]{\begin{bmatrix}#1\end{bmatrix}}
+\newtheorem{theorem}{定理}[section]
+\renewcommand{\proofname}{证明}
+\allowdisplaybreaks[1]
+\begin{document}
+\hypersetup{pageanchor=false}
+\begin{titlepage}
+\centering
+\vspace*{3.5cm}
+{\Large\bfseries 自学报告\par}
+\vspace{0.9cm}
+{\huge\bfseries Doolittle 分解法\par}
+\vspace{0.5cm}
+{\Large\bfseries 从紧凑 LU 分解到部分选主元算法\par}
+\vspace{1.8cm}
+\begin{minipage}{0.84\textwidth}
+\textbf{学习目的：}推导 Doolittle 分解公式，解释其紧凑存储方式；分析无主元交换方法在零主元和小主元下的不足，提出带部分选主元的改进算法，并通过循环不变式证明其正确性。结合完整算例，说明后续行交换时如何维护已经计算出的 $L$，以及如何利用 $PA=LU$ 求解线性方程组。
+\end{minipage}
+\vfill
+\end{titlepage}
+\hypersetup{pageanchor=true}
+\pagenumbering{roman}
+\tableofcontents
+\clearpage
+\pagenumbering{arabic}
+
+\section{引言}
+在线性代数与数值计算中，经常需要求解
+\[
+A\mathbf{x}=\mathbf{b},\qquad A\in\R^{n\times n}.
+\]
+本文主要考虑 $A$ 非奇异的情形。当系数矩阵相同而右端向量多次改变时，每次重新执行高斯消元会造成重复计算。LU 分解将消元与求解分开：先计算 $A=LU$，再依次求解
+\[
+L\mathbf{y}=\mathbf{b},\qquad U\mathbf{x}=\mathbf{y}.
+\]
+Doolittle 方法规定 $L$ 为单位下三角矩阵，即 $\ell_{ii}=1$，而 $U$ 为上三角矩阵。由此可以把两个因子的必要信息存储在同一个数组中。
+
+不过，非奇异性并不能保证按原行序进行的消元始终具有非零主元；浮点运算中的过小主元也可能放大误差。因此，在学习基本公式和紧凑存储之后，还需要引入部分选主元，将分解推广为 $PA=LU$。本文按照“基本方法---不足---改进算法---正确性证明”的顺序展开。
+
+\section{Doolittle 分解及其递推公式}
+\subsection{单位对角线约定}
+一般 LU 分解有尺度上的不唯一性：对任意非奇异对角矩阵 $D$，都有 $LU=(LD)(D^{-1}U)$。Doolittle 分解规定
+\[
+L=\mat{1&0&\cdots&0\\ \ell_{21}&1&\ddots&\vdots\\ \vdots&\ddots&\ddots&0\\ \ell_{n1}&\cdots&\ell_{n,n-1}&1},
+\quad
+U=\mat{u_{11}&u_{12}&\cdots&u_{1n}\\0&u_{22}&\cdots&u_{2n}\\\vdots&\ddots&\ddots&\vdots\\0&\cdots&0&u_{nn}}.
+\]
+在 $A$ 非奇异且这种分解存在的前提下，该约定使 $L,U$ 唯一。
+
+\subsection{由矩阵乘积推导公式}
+由三角结构可知
+\[
+a_{ij}=\sum_{k=1}^{\min(i,j)}\ell_{ik}u_{kj}.
+\]
+当 $i\le j$ 时，由于 $\ell_{ii}=1$，有
+\begin{equation}
+\boxed{u_{ij}=a_{ij}-\sum_{k=1}^{i-1}\ell_{ik}u_{kj}},\qquad j=i,\ldots,n.
+\label{eq:ordinary-u}
+\end{equation}
+对第 $i$ 列中位于对角线以下的元素 $a_{ji}$，有
+\[
+a_{ji}=\sum_{k=1}^{i-1}\ell_{jk}u_{ki}+\ell_{ji}u_{ii}.
+\]
+若 $u_{ii}\ne0$，则
+\begin{equation}
+\boxed{\ell_{ji}=\frac{a_{ji}-\sum_{k=1}^{i-1}\ell_{jk}u_{ki}}{u_{ii}}},\qquad j=i+1,\ldots,n.
+\label{eq:ordinary-l}
+\end{equation}
+空和约定为零。算法在第 $i$ 阶段先计算 $U$ 的第 $i$ 行，再计算 $L$ 的第 $i$ 列。
+
+\subsection{基本算法与适用条件}
+令 $L$ 的对角元为 1。对 $i=1,\ldots,n$，依次执行：
+\begin{enumerate}
+\item 按式 \eqref{eq:ordinary-u} 计算 $u_{ij}$，$j=i,\ldots,n$。
+\item 检查 $u_{ii}\ne0$；若不满足，则当前无主元交换算法不能作为非奇异方程组的求解方法继续执行。
+\item 按式 \eqref{eq:ordinary-l} 计算 $\ell_{ji}$，$j=i+1,\ldots,n$。
+\end{enumerate}
+对非奇异矩阵 $A$，基本 Doolittle 分解存在且所有主元非零，当且仅当所有顺序主子式
+\[
+\Delta_k=\det A_{1:k,1:k},\qquad k=1,\ldots,n
+\]
+均非零。消元成功时，$\Delta_k=u_{11}\cdots u_{kk}$，从而 $u_{kk}=\Delta_k/\Delta_{k-1}$，其中 $\Delta_0=1$。反过来，顺序主子式非零保证递推中的每个主元非零。
+
+\section{普通 Doolittle 分解的完整算例}
+考虑
+\[
+A=\mat{2&1&1\\4&-6&0\\-2&7&2}.
+\]
+第一阶段直接得到
+\[
+u_{11}=2,\quad u_{12}=1,\quad u_{13}=1,\qquad
+\ell_{21}=2,\quad \ell_{31}=-1.
+\]
+第二阶段得到
+\begin{align*}
+u_{22}&=-6-2\cdot1=-8,\\
+u_{23}&=0-2\cdot1=-2,\\
+\ell_{32}&=\frac{7-(-1)\cdot1}{-8}=-1.
+\end{align*}
+第三阶段得到
+\[
+u_{33}=2-(-1)\cdot1-(-1)\cdot(-2)=1.
+\]
+因此
+\[
+L=\mat{1&0&0\\2&1&0\\-1&-1&1},\qquad
+U=\mat{2&1&1\\0&-8&-2\\0&0&1}.
+\]
+直接相乘可得
+\[
+LU=\mat{2&1&1\\4&-6&0\\-2&7&2}=A.
+\]
+本例在原行序下能够完成分解，但这不意味着任意非奇异矩阵都能如此。
+
+\section{为什么称为 LU 分解的“紧凑形式”}
+\subsection{两个因子共用一个数组}
+$L$ 的严格上三角部分为零，$U$ 的严格下三角部分为零，而且 $L$ 的对角元恒为 1。这些已知元素无需显式保存。因此，定义
+\begin{equation}
+c_{ij}=\begin{cases}u_{ij},&i\le j,\\\ell_{ij},&i>j,\end{cases}
+\label{eq:compact}
+\end{equation}
+就能用一个 $n\times n$ 数组 $C$ 保存两个因子的全部必要信息。恢复时只需取
+\[
+L=I+\operatorname{tril}(C,-1),\qquad U=\operatorname{triu}(C),
+\]
+其中 $\operatorname{tril}(C,-1)$ 表示严格下三角部分，$\operatorname{triu}(C)$ 表示上三角部分（含主对角线）。上例的紧凑数组为
+\[
+C=\mat{2&1&1\\2&-8&-2\\-1&-1&1}.
+\]
+它是两个因子的存储表示，不能把它直接当作矩阵乘积 $LU$。
+
+\subsection{原地计算与高斯消元的关系}
+高斯消元使用乘子消去主元下方的元素，最终得到 $U$；在不换行的情况下，这些乘子就是 $L$ 的严格下三角元素。因此，可以将乘子保存在原数组本来要被消成零的位置，让更新后的上三角部分保存 $U$，直接覆盖原矩阵 $A$。
+
+\begin{center}
+\begin{tabularx}{\textwidth}{@{}p{0.29\textwidth}cX@{}}
+\toprule
+存储方式&标量存储量&说明\\
+\midrule
+两个完整矩阵&$2n^2$&显式保存全部位置，包含已知的零。\\
+两个三角数组&$n(n+1)$&两个因子的对角元均显式保存。\\
+Doolittle 紧凑数组&$n^2$&省略 $L$ 的单位对角线。\\
+原地紧凑分解&$n^2$&复用存放 $A$ 的数组，无需另开因子数组。\\
+\bottomrule
+\end{tabularx}
+\end{center}
+这里 $n^2=\frac{n(n-1)}2+\frac{n(n+1)}2$ 是精确计数。若分别压缩存储两个因子并同样省略 $L$ 的对角线，也只需 $n^2$ 个位置；共用原数组的优势还在于布局简单、能够原地计算。
+
+\section{普通方法的不足与改进思路}
+\subsection{不足一：非奇异矩阵也可能遇到零主元}
+考虑
+\[
+A_0=\mat{0&1\\1&1},\qquad \det A_0=-1\ne0.
+\]
+普通算法的第一主元为 $u_{11}=0$，无法计算 $\ell_{21}=1/0$。事实上，若假设存在单位下三角 $L$ 和上三角 $U$ 满足 $A_0=LU$，则
+\[
+\mat{1&0\\\ell_{21}&1}\mat{u_{11}&u_{12}\\0&u_{22}}
+=\mat{u_{11}&u_{12}\\\ell_{21}u_{11}&\ell_{21}u_{12}+u_{22}}.
+\]
+比较第一列，要求同时满足 $u_{11}=0$ 和 $\ell_{21}u_{11}=1$，矛盾。因此，本例在原行序下根本不存在这种 Doolittle 分解。
+
+交换两行即可得到
+\[
+P A_0=\mat{1&1\\0&1},\qquad P=\mat{0&1\\1&0},
+\]
+此时取 $L=I$、$U=PA_0$ 即可。由此可见，\textbf{单个当前主元为零并不意味着矩阵不满秩；它可能只说明当前行序不适合继续消元。}
+
+还需区分“非奇异方程组求解”与“存在某种 LU 分解”：例如 $\operatorname{diag}(1,0)=I\operatorname{diag}(1,0)$ 是奇异矩阵的 LU 分解。本文算法遇到不可用主元时停止，并不表示所有奇异矩阵都不存在 LU 分解。
+
+\subsection{不足二：非零但很小的主元可能放大误差}
+考虑
+\[
+A_\varepsilon=\mat{\varepsilon&1\\1&1},\qquad
+\mathbf b=\mat{1\\2},\qquad 0<\varepsilon\ll1.
+\]
+不交换行时，$\ell_{21}=1/\varepsilon$ 很大，消元得到
+\[
+u_{22}=1-\frac1\varepsilon,\qquad y_2=2-\frac1\varepsilon.
+\]
+以 $\varepsilon=10^{-5}$、每次运算保留四位十进制有效数字为例，$u_{22}$ 和 $y_2$ 都舍入为 $-1.000\times10^5$。于是回代给出
+\[
+\widehat x_2=1,
+\qquad \widehat x_1=\frac{1-\widehat x_2}{10^{-5}}=0.
+\]
+而精确解为
+\[
+x_1=\frac1{1-\varepsilon},\qquad
+x_2=\frac{1-2\varepsilon}{1-\varepsilon},
+\]
+两者都接近 1。第一分量却被计算成 0，说明问题并非仅仅是“能否除以零”，还涉及误差传播。
+
+交换两行后，第一主元变为 1，乘子变为 $\varepsilon$，避免了这个过大的乘子。
+
+\subsection{解决方案：在当前列选择绝对值最大的主元}
+设第 $k$ 步开始时的消元矩阵为 $B^{(k)}$。在尚未完成消元的第 $k,\ldots,n$ 行中选择
+\begin{equation}
+p\in\underset{k\le i\le n}{\operatorname{arg\,max}}\,
+|b^{(k)}_{ik}|.
+\label{eq:pivot}
+\end{equation}
+若有并列，可取最小的行号。交换第 $k,p$ 行后再消元，这称为\textbf{部分选主元}。选择依据是已经更新过的当前列，而不是最初矩阵 $A$ 中未经消元的列。
+
+若该列候选元素中至少有一个非零，就能得到非零主元；并且在精确算术下
+\[
+|\ell_{ik}|=\left|\frac{\widetilde b_{ik}}{\widetilde b_{kk}}\right|\le1,
+\qquad i>k.
+\]
+它限制了乘子的大小，但不保证所有矩阵都不会出现元素增长，也不能消除病态问题本身的敏感性。
+
+\section{带部分选主元的 Doolittle 算法}
+\subsection{分解目标和行交换的含义}
+加入行交换后，目标变为
+\[
+\boxed{PA=LU},
+\]
+其中 $P$ 记录行交换，$L$ 仍为单位下三角矩阵，$U$ 为上三角矩阵。左乘 $P$ 只改变方程的排列，不改变未知量的次序。
+
+为先讲清楚算法，暂时分别保存 $B,L,P$；随后再给出共用一个数组的实现。$B$ 是正在消元的工作矩阵，初始化为 $A$，只有算法结束后才成为 $U$。
+
+\subsection{完整步骤：分别保存工作矩阵与乘子}
+\textbf{输入：}矩阵 $A\in\R^{n\times n}$。\quad
+\textbf{输出：}若过程无零主元，得到 $PA=LU$；否则报告非奇异分解过程无法继续。
+
+初始化 $B\gets A$，$L\gets I_n$，$P\gets I_n$。对 $k=1,2,\ldots,n$ 依次执行：
+\begin{enumerate}[label=\textbf{Step \arabic*.},leftmargin=4.5em]
+\item \textbf{选择主元行。}取 $p\in\operatorname{arg\,max}_{k\le i\le n}|b_{ik}|$。
+\item \textbf{检查当前列。}若 $b_{pk}=0$，则停止。在精确算术下，此时可判定 $A$ 奇异。这里检查的是当前列候选元素的最大绝对值，而非只看原来的 $b_{kk}$。
+\item \textbf{交换行。}若 $p\ne k$：
+\begin{itemize}
+\item 交换 $B$ 的第 $k,p$ 行；这些行的前 $k-1$ 列已经为零。
+\item 交换 $P$ 的第 $k,p$ 行。
+\item 仅交换 $L$ 中第 $k,p$ 行的前 $k-1$ 个元素，即
+\[
+L_{k,1:k-1}\longleftrightarrow L_{p,1:k-1}.
+\]
+当 $k=1$ 时，此项为空操作；$L$ 的单位对角线不作交换。
+\end{itemize}
+\item \textbf{计算乘子并消元。}对 $i=k+1,\ldots,n$：
+\[
+\ell_{ik}\gets\frac{b_{ik}}{b_{kk}},\qquad
+b_{ij}\gets b_{ij}-\ell_{ik}b_{kj}\quad(j=k+1,\ldots,n),
+\]
+随后令 $b_{ik}\gets0$。
+\end{enumerate}
+结束时令 $U\gets B$。第 $n$ 步仍检查最后一个主元，但无需继续消元。
+
+\subsection{为什么还要交换已经计算出的 $L$？}
+$L$ 的前 $k-1$ 列保存了各行在此前消元中使用的乘子。当后续交换工作矩阵的第 $k,p$ 行时，这两行对应的消元历史也随之交换；若不交换这些乘子，就会把一行当前的内容与另一行的历史错误配对，破坏 $PA=LU$。
+
+但是不能简单交换独立存储的整个 $L$ 的两行，因为那会移动单位对角元，破坏单位下三角结构。算法只交换已经完成的前 $k-1$ 列，其余尚未计算的部分继续维持单位矩阵结构。下一节给出严格证明。
+
+\section{算法的正确性证明}
+以下证明均在\textbf{精确算术}下进行；浮点运算只能得到带舍入误差的近似等式。
+
+\subsection{循环不变式}
+第 $k$ 步开始时，记当前矩阵为 $P^{(k)},L^{(k)},B^{(k)}$。证明下列关系始终成立：
+\begin{equation}
+\boxed{P^{(k)}A=L^{(k)}B^{(k)}}.
+\label{eq:invariant}
+\end{equation}
+同时，以前 $k-1$ 个指标为第一块，有
+\begin{equation}
+L^{(k)}=\mat{L_{11}&0\\L_{21}&I},\qquad
+B^{(k)}=\mat{U_{11}&U_{12}\\0&S_k},
+\label{eq:blocks}
+\end{equation}
+其中 $L_{11}$ 为单位下三角矩阵，$U_{11}$ 为对角元非零的上三角矩阵。$S_k$ 是尚待消元的尾部子矩阵，也称当前 Schur 补。
+
+初始化时 $P^{(1)}=I$，$L^{(1)}=I$，$B^{(1)}=A$，所以不变式成立；此时前导块为空。
+
+\subsection{交换行为什么保持分解关系？}
+第 $k$ 步只交换第 $k$ 行与某个 $p\ge k$ 行。对应的置换矩阵可以写成
+\[
+R_k=\mat{I_{k-1}&0\\0&Q},\qquad R_k^{-1}=R_k^{\mathsf T}.
+\]
+其中 $Q$ 在尚未处理的行中作交换。定义
+\[
+\widetilde P=R_kP^{(k)},\qquad
+\widetilde B=R_kB^{(k)},\qquad
+\widetilde L=R_kL^{(k)}R_k^{\mathsf T}.
+\]
+则
+\begin{align*}
+\widetilde L\widetilde B
+&=(R_kL^{(k)}R_k^{\mathsf T})(R_kB^{(k)})\\
+&=R_kL^{(k)}B^{(k)}=R_kP^{(k)}A=\widetilde P A.
+\end{align*}
+因此交换行后仍有对应的分解恒等式。更关键的是，利用式 \eqref{eq:blocks}，
+\begin{equation}
+\widetilde L
+=\mat{I&0\\0&Q}\mat{L_{11}&0\\L_{21}&I}\mat{I&0\\0&Q^{\mathsf T}}
+=\mat{L_{11}&0\\QL_{21}&I}.
+\label{eq:swap-l}
+\end{equation}
+式 \eqref{eq:swap-l} 表明，$\widetilde L$ 仍是单位下三角矩阵；它与旧 $L$ 的区别恰好是第 $k,p$ 行前 $k-1$ 列互换。这正是算法对 $L$ 的更新规则。这里的左右同时置换只是证明工具，程序中无需实际交换 $L$ 的整列。
+
+\subsection{消元为什么保持分解关系？}
+交换后主元 $\widetilde b_{kk}\ne0$。令
+\[
+m_i=\frac{\widetilde b_{ik}}{\widetilde b_{kk}}\quad(i>k),
+\qquad
+N_k=\sum_{i=k+1}^{n}m_i e_i e_k^{\mathsf T},
+\]
+其中 $e_i$ 是第 $i$ 个标准基向量。定义消元矩阵 $E_k=I-N_k$。由于 $e_k^{\mathsf T}e_i=0$（$i>k$），有 $N_k^2=0$，从而
+\[
+E_k^{-1}=I+N_k.
+\]
+令
+\[
+B^{(k+1)}=E_k\widetilde B,\qquad
+L^{(k+1)}=\widetilde L E_k^{-1},\qquad
+P^{(k+1)}=\widetilde P.
+\]
+于是
+\[
+L^{(k+1)}B^{(k+1)}
+=\widetilde L E_k^{-1}E_k\widetilde B
+=\widetilde L\widetilde B=P^{(k+1)}A.
+\]
+左乘 $E_k$ 正是将第 $i$ 行减去 $m_i$ 倍的第 $k$ 行，因此消去了第 $k$ 列对角线以下的元素，而且前面各列的零不会被破坏。
+
+另一方面，$\widetilde L$ 的右下块为单位矩阵，所以对 $i>k$，有 $\widetilde L e_i=e_i$。因此
+\[
+\widetilde L E_k^{-1}
+=\widetilde L+\sum_{i=k+1}^{n}m_i e_i e_k^{\mathsf T}.
+\]
+这只是在 $L$ 的第 $k$ 列下方写入新乘子 $m_i$，不改变已完成的前 $k-1$ 列。于是结构条件与不变式均延续到下一步。
+
+\subsection{非奇异矩阵为什么总能选到非零主元？}
+\begin{theorem}
+若 $A$ 非奇异，则在精确算术下，部分选主元算法每一步都能找到非零主元，最终得到 $PA=LU$。
+\end{theorem}
+\begin{proof}
+假设已经完成前 $k-1$ 步。由不变式，$P^{(k)}$ 和 $L^{(k)}$ 均可逆，故
+\[
+B^{(k)}=(L^{(k)})^{-1}P^{(k)}A
+\]
+也非奇异。由分块上三角结构，
+\[
+\det B^{(k)}=\det U_{11}\,\det S_k\ne0,
+\]
+所以 $S_k$ 非奇异，其第一列不可能全为零。因此候选元素 $b^{(k)}_{kk},\ldots,b^{(k)}_{nk}$ 至少一个非零，按最大绝对值选出的主元必非零。
+
+每一步均可继续，且上述两部分证明了不变式持续成立。完成所有步骤后，$B^{(n+1)}$ 为上三角矩阵，记为 $U$；$L^{(n+1)}$ 为单位下三角矩阵，记为 $L$；$P^{(n+1)}$ 为置换矩阵，记为 $P$。于是 $PA=LU$。
+\end{proof}
+反之，若某一步候选列全为零，则 $S_k$ 的第一列为零，故 $\det S_k=0$，由同一不变式可推出 $\det A=0$。这与“仅当前对角位置为零”是不同的判断。
+
+\section{带两次行交换的数值算例}
+仍采用前面的矩阵
+\[
+A=\mat{2&1&1\\4&-6&0\\-2&7&2}.
+\]
+使用同一个矩阵，便于比较普通分解与部分选主元分解。
+
+\subsection{第一步：交换第 1、2 行，再消元}
+第一列最大绝对值为 4，因此交换第 1、2 行：
+\[
+P^{(2)}=\mat{0&1&0\\1&0&0\\0&0&1},\qquad
+\widetilde B=\mat{4&-6&0\\2&1&1\\-2&7&2}.
+\]
+消元乘子为 $\ell_{21}=1/2$、$\ell_{31}=-1/2$，得到
+\[
+B^{(2)}=\mat{4&-6&0\\0&4&1\\0&4&2},\qquad
+L^{(2)}=\mat{1&0&0\\\frac12&1&0\\-\frac12&0&1}.
+\]
+
+\subsection{第二步：交换第 2、3 行，同时维护 $L$}
+当前第二列的两个候选值都为 4。\textbf{为展示后续换行如何维护 $L$，本例在并列时选择第 3 行}；这符合最大绝对值选主元规则。若实现固定选最小行号，也同样正确，只会得到另一组因子。
+
+交换工作矩阵第 2、3 行后，
+\[
+\widetilde B=\mat{4&-6&0\\0&4&2\\0&4&1}.
+\]
+同时，必须交换 $L$ 的这两行中已经完成的第一列：
+\[
+\widetilde L=\mat{1&0&0\\-\frac12&1&0\\\frac12&0&1},\qquad
+P=\mat{0&1&0\\0&0&1\\1&0&0}.
+\]
+再计算新的乘子 $\ell_{32}=4/4=1$，并更新 $b_{33}=1-1\cdot2=-1$。
+
+\subsection{最终结果与验证}
+最后一个主元为 $-1\ne0$，算法结束，得到
+\[
+L=\mat{1&0&0\\-\frac12&1&0\\\frac12&1&1},\qquad
+U=\mat{4&-6&0\\0&4&2\\0&0&-1}.
+\]
+直接验证
+\[
+LU=\mat{4&-6&0\\-2&7&2\\2&1&1}=PA.
+\]
+若第二步只交换 $B$，却不交换 $L$ 中已算好的第一列，就会错误地得到
+\[
+L_{\mathrm{wrong}}=\mat{1&0&0\\\frac12&1&0\\-\frac12&1&1}.
+\]
+此时 $(L_{\mathrm{wrong}}U)_{21}=2$，但 $(PA)_{21}=-2$，所以乘积不可能等于 $PA$。这直接说明维护旧乘子不可省略。
+
+\section{带主元交换的原地紧凑实现}
+\subsection{一个数组中各部分的含义}
+令 $C\gets A$。第 $k$ 步开始时：
+\begin{itemize}
+\item 前 $k-1$ 列的严格下三角位置保存已经完成的 $L$ 元素；
+\item 前 $k-1$ 行的主对角线及右侧位置保存已经完成的 $U$ 元素；
+\item 尾部块 $C_{k:n,k:n}$ 保存当前待消元矩阵 $S_k$。
+\end{itemize}
+交换第 $k,p$ 行时，可直接交换 $C$ 的\textbf{整行}：前 $k-1$ 列交换的是旧乘子，其余列交换的是待消元数据。由于 $k,p$ 都不小于当前步号，不会移动前面已完成的 $U$ 行。
+
+这与“不能交换独立存储的 $L$ 的整行”并不矛盾：紧凑数组里没有保存 $L$ 的单位对角线，同一行的不同区段具有不同含义。
+
+\subsection{原地算法}
+初始化 $C\gets A$，置换向量 $\pi\gets(1,2,\ldots,n)$。对 $k=1,\ldots,n$：
+\begin{enumerate}
+\item 选取 $p\in\operatorname{arg\,max}_{k\le i\le n}|c_{ik}|$。若 $c_{pk}=0$，停止并报告奇异。
+\item 交换 $C$ 的第 $k,p$ 整行，同时交换 $\pi_k,\pi_p$。
+\item 对 $i=k+1,\ldots,n$，先保存乘子
+\[
+c_{ik}\gets c_{ik}/c_{kk},
+\]
+再更新尾部行
+\[
+c_{ij}\gets c_{ij}-c_{ik}c_{kj},\qquad j=k+1,\ldots,n.
+\]
+\end{enumerate}
+结束后按式 \eqref{eq:compact} 读取 $L,U$，且 $P$ 由 $P_{i,\pi_i}=1$、其余元素为零定义。因此 $(PA)_{ij}=a_{\pi_i,j}$。
+
+上节算例最终的紧凑存储为
+\[
+C=\mat{4&-6&0\\-\frac12&4&2\\\frac12&1&-1},\qquad
+\pi=(2,3,1).
+\]
+数组仍只需 $n^2$ 个标量位置，另加长度为 $n$ 的置换向量；若覆盖输入数组，除置换向量和少量临时变量外，无需额外的 $n\times n$ 因子数组。
+
+\section{利用分解求解线性方程组}
+无行交换时，按 $L\mathbf y=\mathbf b$、$U\mathbf x=\mathbf y$ 求解。带行交换时，必须从
+\[
+A\mathbf x=\mathbf b\quad\Longrightarrow\quad
+PA\mathbf x=P\mathbf b\quad\Longrightarrow\quad
+LU\mathbf x=P\mathbf b
+\]
+出发，依次求解
+\[
+\boxed{L\mathbf y=P\mathbf b,\qquad U\mathbf x=\mathbf y}.
+\]
+若 $\widetilde b_i=b_{\pi_i}$，则前代与回代公式分别为
+\[
+y_i=\widetilde b_i-\sum_{j=1}^{i-1}\ell_{ij}y_j,
+\qquad i=1,\ldots,n,
+\]
+\[
+x_i=\frac{y_i-\sum_{j=i+1}^{n}u_{ij}x_j}{u_{ii}},
+\qquad i=n,n-1,\ldots,1.
+\]
+行交换只改变方程顺序，所以最终 $\mathbf x$ 的分量顺序不需要额外还原。
+
+例如对上节矩阵，取 $\mathbf b=(4,-2,7)^{\mathsf T}$，则 $P\mathbf b=(-2,7,4)^{\mathsf T}$。前代得到
+\[
+y_1=-2,\qquad y_2=7-(-\tfrac12)(-2)=6,\qquad
+y_3=4-\tfrac12(-2)-6=-1.
+\]
+回代得到 $x_3=1$，$x_2=(6-2)/4=1$，$x_1=(-2+6)/4=1$。原矩阵各行之和恰好为 $4,-2,7$，验证了解的正确性。
+
+\section{计算量与数值稳定性}
+对稠密 $n\times n$ 矩阵，Doolittle 分解的主要浮点运算量约为 $\frac23n^3$。部分选主元增加的查找与行交换工作量为 $O(n^2)$，不改变总体 $O(n^3)$ 的数量级。分解完成后，每个新右端向量的置换需要 $O(n)$ 工作量，前代和回代合计为 $O(n^2)$。
+
+在精确算术下，部分选主元保证非奇异矩阵不会因零主元而中断，并使消元乘子的绝对值不超过 1。在浮点算术下，它通常能改善计算的稳定性，但仍可能遇到较大的元素增长；若 $A$ 本身病态，微小输入误差和舍入误差也可能导致明显的解误差。因此，\textbf{代数上的正确性与浮点计算中的稳定性是两个不同问题}。
+
+理论算法使用 $c_{pk}=0$ 判断是否能够继续；实际程序还可以根据矩阵尺度检查极小主元并给出数值警告。仅因主元低于某个容差，不能严格断言原矩阵在数学上奇异。求解后可检查残差 $\mathbf r=\mathbf b-A\widehat{\mathbf x}$，但对病态矩阵，小残差本身也不保证解的前向误差很小。
+
+\section{结论}
+Doolittle 分解通过规定 $L$ 的单位对角线，给出了逐行计算 $U$、逐列计算 $L$ 的递推公式。由于已知零元素和 $L$ 的单位对角元无需存储，两个因子的必要信息可以共用一个 $n\times n$ 数组，并覆盖原矩阵完成原地计算，这体现了其紧凑性。
+
+普通方法的不足在于：非奇异矩阵也可能因原行序不合适而出现零主元，小主元还可能在浮点运算中放大误差。部分选主元通过在当前列中选择绝对值最大的候选元素并交换行，得到改进分解 $PA=LU$。
+
+算法正确性的关键是同步维护已经计算出的乘子。后续换行时，独立存储的 $L$ 只交换对应行的已完成列；紧凑存储时，这一操作与尾部工作矩阵的换行合并为整行交换。循环不变式 $P^{(k)}A=L^{(k)}B^{(k)}$ 严格说明了这种处理为何正确，并证明了非奇异矩阵在精确算术下总能完成分解。由此，带部分选主元的 Doolittle 方法在保留紧凑存储特点的同时，具有更广的适用范围和通常更好的数值表现。
+
+\begin{thebibliography}{9}
+\addcontentsline{toc}{section}{参考文献}
+\bibitem{golub} G. H. Golub and C. F. Van Loan, \textit{Matrix Computations}, 4th ed., Johns Hopkins University Press, 2013.
+\bibitem{higham} N. J. Higham, \textit{Accuracy and Stability of Numerical Algorithms}, 2nd ed., SIAM, 2002.
+\bibitem{burden} R. L. Burden and J. D. Faires, \textit{Numerical Analysis}, 9th ed., Brooks/Cole, 2011.
+\end{thebibliography}
+\end{document}

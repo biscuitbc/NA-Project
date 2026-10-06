@@ -1,0 +1,393 @@
+% !TeX program = pdflatex
+% English Beamer presentation based on report.tex
+% Compile with pdflatex (run twice for the outline/navigation).
+\documentclass[11pt,aspectratio=169]{beamer}
+
+\usetheme{Madrid}
+\usecolortheme{default}
+\usepackage{amsmath,amssymb,mathtools}
+\usepackage{booktabs,array}
+
+\setbeamertemplate{navigation symbols}{}
+\setbeamertemplate{caption}[numbered]
+
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\mat}[1]{\begin{bmatrix}#1\end{bmatrix}}
+
+\title[Doolittle Decomposition]{Doolittle Decomposition}
+\subtitle{From Compact LU Factorization to Partial Pivoting}
+\author[Pengju Jin, Siquan Fang, Haoye He]{Pengju Jin \and Siquan Fang \and Haoye He}
+\institute[Zhejiang University]{Zhejiang University}
+\date{\today}
+
+\begin{document}
+
+% ---------------------------------------------------------------- Title
+\begin{frame}
+  \titlepage
+\end{frame}
+
+% ---------------------------------------------------------------- Outline
+\begin{frame}{Outline}
+  \tableofcontents
+\end{frame}
+
+% =================================================================
+\section{Motivation and the Basic Method}
+% =================================================================
+
+\begin{frame}{Why LU Factorization?}
+  Solve $A\mathbf{x}=\mathbf{b}$ with $A\in\R^{n\times n}$ nonsingular, for many $\mathbf{b}$:
+  \[
+    A=LU \;\Longrightarrow\;
+    \underbrace{L\mathbf{y}=\mathbf{b}}_{\text{forward}},\quad
+    \underbrace{U\mathbf{x}=\mathbf{y}}_{\text{back}}.
+  \]
+  Decompose \emph{once}; each new $\mathbf{b}$ then costs only $O(n^2)$.
+  \vfill
+  \begin{alertblock}{Roadmap}
+    Basic formulas \& compact storage $\to$ shortcomings $\to$
+    partial pivoting ($PA=LU$) $\to$ correctness.
+  \end{alertblock}
+\end{frame}
+
+\begin{frame}{The Doolittle Convention}
+  LU is not unique: $LU=(LD)(D^{-1}U)$ for any nonsingular diagonal $D$.
+  Fix the scale by making $L$ \emph{unit} lower triangular ($\ell_{ii}=1$):
+  \[
+    L=\mat{1&0&\cdots&0\\ \ell_{21}&1&\ddots&\vdots\\ \vdots&\ddots&\ddots&0\\ \ell_{n1}&\cdots&\ell_{n,n-1}&1},
+    \qquad
+    U=\mat{u_{11}&u_{12}&\cdots&u_{1n}\\0&u_{22}&\cdots&u_{2n}\\\vdots&\ddots&\ddots&\vdots\\0&\cdots&0&u_{nn}}.
+  \]
+  For nonsingular $A$ (when the factorization exists), this makes $L,U$ \textbf{unique}.
+\end{frame}
+
+\begin{frame}{Recursive Formulas}
+  Since $a_{ij}=\sum_{k=1}^{\min(i,j)}\ell_{ik}u_{kj}$, with $\ell_{ii}=1$:
+  \begin{columns}[T]
+    \begin{column}{0.47\textwidth}
+      \textbf{Row $i$ of $U$} ($i\le j$):
+      \[
+        \boxed{\,u_{ij}=a_{ij}-\sum_{k=1}^{i-1}\ell_{ik}u_{kj}\,}
+      \]
+    \end{column}
+    \begin{column}{0.49\textwidth}
+      \textbf{Column $i$ of $L$} ($j>i$, $u_{ii}\ne0$):
+      \[
+        \boxed{\,\ell_{ji}=\frac{a_{ji}-\sum_{k=1}^{i-1}\ell_{jk}u_{ki}}{u_{ii}}\,}
+      \]
+    \end{column}
+  \end{columns}
+  \medskip
+  Stage $i$: compute row $i$ of $U$, then column $i$ of $L$ (empty sums are zero).
+\end{frame}
+
+\begin{frame}{Basic Algorithm and Existence Condition}
+  Set $\ell_{ii}=1$. For $i=1,\dots,n$:
+  \begin{enumerate}
+    \item compute $u_{ij}$, $j=i,\dots,n$;
+    \item if $u_{ii}=0$, stop (no pivot);
+    \item compute $\ell_{ji}$, $j=i+1,\dots,n$.
+  \end{enumerate}
+  \begin{block}{Existence (nonsingular $A$)}
+    All pivots are nonzero \textbf{iff} every leading principal minor is nonzero:
+    \[
+      \Delta_k=\det A_{1:k,1:k}\neq0,\quad k=1,\dots,n,
+      \qquad u_{kk}=\Delta_k/\Delta_{k-1}.
+    \]
+  \end{block}
+\end{frame}
+
+\begin{frame}{Worked Example (No Pivoting)}
+  \[
+    A=\mat{2&1&1\\4&-6&0\\-2&7&2}.
+  \]
+  \textbf{Stage 1:}\quad $u_{11}=2,\ u_{12}=1,\ u_{13}=1;\quad \ell_{21}=2,\ \ell_{31}=-1.$
+  \medskip
+
+  \textbf{Stage 2:}\quad $u_{22}=-6-2\cdot1=-8,\quad u_{23}=-2,\quad \ell_{32}=(-8)/(-8)=-1.$
+  \medskip
+
+  \textbf{Stage 3:}\quad $u_{33}=2-(-1)(1)-(-1)(-2)=1.$
+  \medskip
+
+  \[
+    L=\mat{1&0&0\\2&1&0\\-1&-1&1},\quad
+    U=\mat{2&1&1\\0&-8&-2\\0&0&1},\qquad LU=A.\;\checkmark
+  \]
+  Works here --- but not for every nonsingular matrix.
+\end{frame}
+
+% =================================================================
+\section{Compact Storage}
+% =================================================================
+
+\begin{frame}{Why Is It Called the Compact Form?}
+  Known structure is free ($L$ unit lower triangular, $U$ upper triangular).
+  Store both factors in \textbf{one} $n\times n$ array:
+  \[
+    c_{ij}=\begin{cases}u_{ij},&i\le j,\\ \ell_{ij},&i>j,\end{cases}
+    \qquad L=I+\operatorname{tril}(C,-1),\quad U=\operatorname{triu}(C).
+  \]
+  \begin{columns}[T]
+    \begin{column}{0.40\textwidth}
+      \[
+        C=\mat{2&1&1\\2&-8&-2\\-1&-1&1}
+      \]
+    \end{column}
+    \begin{column}{0.56\textwidth}
+      \begin{tabular}{@{}lr@{}}
+        \toprule
+        Storage & Scalars \\
+        \midrule
+        Two full matrices       & $2n^2$ \\
+        Two triangular arrays   & $n(n+1)$ \\
+        \textbf{Doolittle compact} & $\mathbf{n^2}$ \\
+        \bottomrule
+      \end{tabular}
+    \end{column}
+  \end{columns}
+  \begin{itemize}
+    \item Elimination link: multipliers sit where entries were zeroed, so the
+      factorization can \textbf{overwrite} $A$ in place.
+  \end{itemize}
+\end{frame}
+
+% =================================================================
+\section{Shortcomings of the Basic Method}
+% =================================================================
+
+\begin{frame}{Shortcoming 1: Zero Pivot despite Nonsingularity}
+  \small
+  \[
+    A_0=\mat{0&1\\1&1},\qquad \det A_0=-1\neq0.
+  \]
+  First pivot $u_{11}=0$, so $\ell_{21}=1/0$ is undefined. If $A_0=LU$ with unit
+  lower $L$, the first column needs $u_{11}=0$ \emph{and} $\ell_{21}u_{11}=1$ --- impossible.
+  Swapping rows gives
+  \[
+    PA_0=\mat{1&1\\0&1},\qquad P=\mat{0&1\\1&0},\qquad L=I,\ U=PA_0.
+  \]
+  \begin{alertblock}{Key point}
+    A zero pivot does \textbf{not} imply singularity --- just a bad row order.
+  \end{alertblock}
+\end{frame}
+
+\begin{frame}{Shortcoming 2: Small Pivot Amplifies Error}
+  \[
+    A_\varepsilon=\mat{\varepsilon&1\\1&1},\quad \mathbf{b}=\mat{1\\2},\quad 0<\varepsilon\ll1.
+  \]
+  Without swapping, $\ell_{21}=1/\varepsilon$ is huge:
+  $u_{22}=1-\tfrac1\varepsilon,\ y_2=2-\tfrac1\varepsilon$.
+  \medskip
+
+  With $\varepsilon=10^{-5}$ and 4 significant digits both round to $-1.000\times10^{5}$, so
+  \[
+    \widehat x_2=1,\qquad \widehat x_1=\frac{1-\widehat x_2}{10^{-5}}=0
+    \qquad(\text{exact } x_1,x_2\approx1).
+  \]
+  \begin{block}{Diagnosis}
+    Not a divide-by-zero issue but \emph{error propagation}; swapping makes the pivot $1$.
+  \end{block}
+\end{frame}
+
+\begin{frame}{The Fix: Partial Pivoting}
+  At step $k$, pick the largest magnitude in the \textbf{current} column of $B^{(k)}$:
+  \[
+    p\in\underset{k\le i\le n}{\operatorname{arg\,max}}\,|b^{(k)}_{ik}|;
+    \qquad \text{swap rows } k,p,\ \text{then eliminate.}
+  \]
+  \begin{itemize}
+    \item Uses the \emph{updated} column, not the original column of $A$.
+    \item A nonzero candidate gives a nonzero pivot; in exact arithmetic $|\ell_{ik}|\le1$.
+  \end{itemize}
+  \begin{alertblock}{Limits}
+    Bounding multipliers does not prevent element growth, nor cure ill-conditioning.
+  \end{alertblock}
+\end{frame}
+
+% =================================================================
+\section{The Partial-Pivoting Algorithm}
+% =================================================================
+
+\begin{frame}{Partial-Pivoting Algorithm: $PA=LU$}
+  \small
+  $P$ records row swaps; $L$ unit lower triangular, $U$ upper triangular. Left-multiplying
+  by $P$ only reorders \emph{equations}.
+  \medskip
+
+  Init $B\gets A$, $L\gets I_n$, $P\gets I_n$. For $k=1,\dots,n$:
+  \begin{enumerate}
+    \item $p\in\operatorname{arg\,max}_{k\le i\le n}|b_{ik}|$.
+    \item if $b_{pk}=0$, stop ($A$ singular).
+    \item if $p\neq k$: swap rows $k,p$ of $B$ and $P$; swap \textbf{only the first
+      $k-1$ entries} of rows $k,p$ of $L$.
+    \item for $i=k+1,\dots,n$: $\ \ell_{ik}\gets b_{ik}/b_{kk}$;\;
+      $b_{ij}\gets b_{ij}-\ell_{ik}b_{kj}$ $(j>k)$;\; $b_{ik}\gets0$.
+  \end{enumerate}
+  Finally $U\gets B$.
+\end{frame}
+
+\begin{frame}{Why Swap the Already-Computed $L$?}
+  \begin{itemize}
+    \item Columns $1..k-1$ of $L$ record the multipliers each row used earlier; swapping
+      rows of the working matrix swaps those histories.
+    \item Mispaired multipliers \textbf{break} $PA=LU$.
+    \item Swap \textbf{only} the finished first $k-1$ entries --- swapping whole $L$ rows
+      would move the unit diagonal and break the structure.
+  \end{itemize}
+\end{frame}
+
+% =================================================================
+\section{Why the Algorithm Is Correct}
+% =================================================================
+
+\begin{frame}{Nonsingular $A$ Always Has a Nonzero Pivot}
+  \small
+  \begin{block}{Theorem}
+    If $A$ is nonsingular, in exact arithmetic every step of partial pivoting finds a
+    nonzero pivot and terminates with $PA=LU$.
+  \end{block}
+  \begin{proof}
+    Each step is a row swap (det $\pm1$) followed by unit lower-triangular elimination
+    (det $1$), so the working matrix keeps a nonzero determinant. Its leading part is
+    upper triangular with the nonzero pivots on the diagonal, so in the block form
+    $\mat{U_{11}&U_{12}\\0&S_k}$ the trailing block satisfies $\det S_k\neq0$. Hence
+    $S_k$ is nonsingular, its first column is not all zero, and the max-magnitude pivot
+    is nonzero. Induction over $k$ gives $PA=LU$.
+  \end{proof}
+  Conversely, an all-zero candidate column would give $\det S_k=0\Rightarrow\det A=0$.
+\end{frame}
+
+% =================================================================
+\section{Numerical Example with Row Swaps}
+% =================================================================
+
+\begin{frame}{Example: Two Row Swaps}
+  \[
+    A=\mat{2&1&1\\4&-6&0\\-2&7&2}.
+  \]
+  \small
+  \textbf{Step 1.} Max in column 1 is $4$: swap rows 1, 2; $\ell_{21}=\tfrac12,\ \ell_{31}=-\tfrac12$:
+  \[
+    B^{(2)}=\mat{4&-6&0\\0&4&1\\0&4&2},\quad
+    L^{(2)}=\mat{1&0&0\\ \tfrac12&1&0\\ -\tfrac12&0&1}.
+  \]
+  \textbf{Step 2.} Column 2 ties at $4$: choose row 3, swapping rows 2, 3 of $B$ \emph{and
+  the finished first column of $L$}:
+  \[
+    \widetilde B=\mat{4&-6&0\\0&4&2\\0&4&1},\quad
+    \widetilde L=\mat{1&0&0\\ -\tfrac12&1&0\\ \tfrac12&0&1}
+    \;\Rightarrow\; \ell_{32}=1,\ b_{33}=-1.
+  \]
+\end{frame}
+
+\begin{frame}{Result and Verification}
+  \[
+    L=\mat{1&0&0\\ -\tfrac12&1&0\\ \tfrac12&1&1},\quad
+    U=\mat{4&-6&0\\0&4&2\\0&0&-1},\quad
+    P=\mat{0&1&0\\0&0&1\\1&0&0},\quad
+    LU=\mat{4&-6&0\\-2&7&2\\2&1&1}=PA.\;\checkmark
+  \]
+  \begin{alertblock}{Skipping the $L$ swap is fatal}
+    Swapping only $B$ gives
+    $L_{\text{wrong}}=\mat{1&0&0\\ \tfrac12&1&0\\ -\tfrac12&1&1}$, for which
+    $(L_{\text{wrong}}U)_{21}=2\neq-2=(PA)_{21}$.
+  \end{alertblock}
+\end{frame}
+
+% =================================================================
+\section{In-Place Implementation, Solving, and Cost}
+% =================================================================
+
+\begin{frame}{In-Place Compact Implementation}
+  \small
+  Let $C\gets A$. At step $k$: columns $1..k-1$ hold $L$, rows $1..k-1$ hold $U$, and the
+  trailing block holds $S_k$. Swapping rows $k,p$ swaps \textbf{entire rows} of $C$
+  (finished $U$ rows are untouched since $k,p\ge k$).
+  \medskip
+
+  $C\gets A$, $\pi\gets(1,\dots,n)$. For $k=1,\dots,n$:
+  \begin{enumerate}
+    \item $p\in\operatorname{arg\,max}_{k\le i\le n}|c_{ik}|$; if $c_{pk}=0$, stop.
+    \item swap rows $k,p$ of $C$ and $\pi_k\leftrightarrow\pi_p$.
+    \item for $i>k$: $\ c_{ik}\gets c_{ik}/c_{kk}$;\;
+      $c_{ij}\gets c_{ij}-c_{ik}c_{kj}$, $j>k$.
+  \end{enumerate}
+  Read $L,U$ back by the compact rule; $P_{i,\pi_i}=1$, so $(PA)_{ij}=a_{\pi_i,j}$.
+  \[
+    C=\mat{4&-6&0\\ -\tfrac12&4&2\\ \tfrac12&1&-1},\qquad \pi=(2,3,1).
+  \]
+\end{frame}
+
+\begin{frame}{Solving $A\mathbf{x}=\mathbf{b}$ with $PA=LU$}
+  \[
+    A\mathbf{x}=\mathbf{b}\Rightarrow PA\mathbf{x}=P\mathbf{b}\Rightarrow LU\mathbf{x}=P\mathbf{b}
+    \Rightarrow \boxed{L\mathbf{y}=P\mathbf{b},\ \ U\mathbf{x}=\mathbf{y}.}
+  \]
+  With $\widetilde b_i=b_{\pi_i}$:
+  \[
+    y_i=\widetilde b_i-\sum_{j=1}^{i-1}\ell_{ij}y_j,\qquad
+    x_i=\frac{y_i-\sum_{j=i+1}^{n}u_{ij}x_j}{u_{ii}}.
+  \]
+  \begin{exampleblock}{Example}
+    $\mathbf b=(4,-2,7)^{\mathsf T}\Rightarrow P\mathbf b=(-2,7,4)^{\mathsf T}$:
+    $y=(-2,6,-1)^{\mathsf T}\Rightarrow x=(1,1,1)^{\mathsf T}$.
+  \end{exampleblock}
+\end{frame}
+
+\begin{frame}{Cost and Stability}
+  \begin{columns}[T]
+    \begin{column}{0.52\textwidth}
+      \textbf{Work}
+      \begin{itemize}
+        \item Factorization: $\approx\tfrac23 n^3$.
+        \item Pivot search + swaps: $O(n^2)$; overall still $O(n^3)$.
+        \item Each new $\mathbf{b}$: $O(n^2)$.
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \textbf{Stability}
+      \begin{itemize}
+        \item Exact: no zero-pivot failure, $|\ell_{ik}|\le1$.
+        \item Floating point: usually better, growth still possible.
+        \item Ill-conditioned $A$ stays sensitive.
+      \end{itemize}
+    \end{column}
+  \end{columns}
+  \begin{alertblock}{Two different questions}
+    Algebraic correctness $\neq$ floating-point stability. A tiny pivot justifies a
+    warning, not a claim of singularity.
+  \end{alertblock}
+\end{frame}
+
+% =================================================================
+\section{Conclusion}
+% =================================================================
+
+\begin{frame}{Conclusion}
+  \begin{itemize}
+    \item The unit-diagonal convention gives recursive formulas and a \textbf{compact}
+      $n^2$ storage that works in place.
+    \item Zero or tiny pivots make the basic method fail or lose accuracy.
+    \item \textbf{Partial pivoting} yields $PA=LU$, keeping the computed multipliers
+      consistent on each row swap.
+    \item Nonsingular $A$ always completes in exact arithmetic, terminating with
+      $PA=LU$.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{References}
+  \begin{thebibliography}{9}
+    \bibitem{golub} G.~H. Golub and C.~F. Van Loan,
+      \emph{Matrix Computations}, 4th ed., Johns Hopkins University Press, 2013.
+    \bibitem{higham} N.~J. Higham,
+      \emph{Accuracy and Stability of Numerical Algorithms}, 2nd ed., SIAM, 2002.
+    \bibitem{burden} R.~L. Burden and J.~D. Faires,
+      \emph{Numerical Analysis}, 9th ed., Brooks/Cole, 2011.
+  \end{thebibliography}
+  \vfill
+  \centering \Large Thank you! \; Questions?
+\end{frame}
+
+\end{document}
