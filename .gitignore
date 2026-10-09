@@ -9,5 +9,10 @@
 *.fls
 *.fdb_latexmk
 
+# C/C++ build output
+build/
+*.o
+doolittle_demo
+
 # Windows / WSL alternate-data-stream metadata
 *:Zone.Identifier
